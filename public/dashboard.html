@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BROKEN LORD – Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      background: #020617;
+      color: #e5e7eb;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 20px;
+    }
+    .card {
+      max-width: 480px;
+      margin: 0 auto;
+      background: rgba(15,23,42,0.95);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 0 40px rgba(129,140,248,0.4);
+      border: 1px solid rgba(148,163,184,0.4);
+    }
+    h1 {
+      font-size: 22px;
+      margin-bottom: 10px;
+      color: #a855f7;
+    }
+    .status {
+      font-size: 13px;
+      margin-bottom: 10px;
+      color: #67e8f9;
+    }
+    .file-list {
+      margin-top: 10px;
+      font-size: 13px;
+      max-height: 260px;
+      overflow-y: auto;
+      border-top: 1px solid rgba(148,163,184,0.3);
+      padding-top: 10px;
+    }
+    .file-item {
+      margin-bottom: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(55,65,81,0.8);
+    }
+    .file-name {
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+    .file-progress {
+      font-size: 12px;
+      color: #a5b4fc;
+    }
+    .file-actions a {
+      font-size: 12px;
+      color: #22c55e;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>BROKEN LORD – Live File Dashboard</h1>
+    <div class="status" id="status">Connecting...</div>
+    <div class="file-list" id="fileList"></div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    const socket = io();
+    const statusEl = document.getElementById("status");
+    const fileListEl = document.getElementById("fileList");
+
+    const params = new URLSearchParams(location.search);
+    const sessionId = params.get("session");
+
+    if (!sessionId) {
+      statusEl.textContent = "No session ID. Hakuna session kwenye link.";
+    }
+
+    const files = new Map();
+
+    function renderFile(fileId) {
+      const data = files.get(fileId);
+      if (!data) return;
+
+      let el = data.el;
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "file-item";
+        data.el = el;
+        fileListEl.appendChild(el);
+      }
+
+      const percent = ((data.received / data.size) * 100).toFixed(1);
+
+      el.innerHTML = `
+        <div class="file-name">${data.name}</div>
+        <div class="file-progress">Progress: ${percent}% (${data.received}/${data.size} bytes)</div>
+        <div class="file-actions">
+          ${data.blobUrl ? `<a href="${data.blobUrl}" download="${data.name}">Download file</a>` : ""}
+        </div>
+      `;
+    }
+
+    socket.on("connect", () => {
+      if (!sessionId) return;
+      statusEl.textContent = "Connected. Joining session " + sessionId + "...";
+      socket.emit("join_dashboard", { sessionId }, (res) => {
+        if (!res.ok) {
+          statusEl.textContent = "Session error: " + res.error;
+        } else {
+          statusEl.textContent = "Live session: " + sessionId + " – waiting for files...";
+        }
+      });
+    });
+
+    socket.on("receive_file_chunk", ({ fileId, name, size, chunk, done }) => {
+      let file = files.get(fileId);
+      if (!file) {
+        file = {
+          name,
+          size,
+          received: 0,
+          chunks: []
+        };
+        files.set(fileId, file);
+      }
+
+      const uint8 = new Uint8Array(chunk);
+      file.chunks.push(uint8);
+      file.received += uint8.byteLength;
+
+      if (done) {
+        const blob = new Blob(file.chunks);
+        const url = URL.createObjectURL(blob);
+        file.blobUrl = url;
+      }
+
+      renderFile(fileId);
+    });
+
+    socket.on("session_closed", () => {
+      statusEl.textContent = "Session closed by uploader.";
+    });
+  </script>
+</body>
+</html>
