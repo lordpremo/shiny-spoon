@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BROKEN LORD – Uploader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      background: #050816;
+      color: #e5e7eb;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 20px;
+    }
+    .card {
+      max-width: 480px;
+      margin: 0 auto;
+      background: rgba(15,23,42,0.9);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 0 40px rgba(56,189,248,0.3);
+      border: 1px solid rgba(148,163,184,0.4);
+    }
+    h1 {
+      font-size: 22px;
+      margin-bottom: 10px;
+      color: #38bdf8;
+    }
+    .btn {
+      background: linear-gradient(135deg,#22c55e,#0ea5e9);
+      border: none;
+      color: white;
+      padding: 10px 16px;
+      border-radius: 999px;
+      font-size: 15px;
+      margin-top: 10px;
+    }
+    .btn:active {
+      transform: scale(0.97);
+    }
+    input[type="file"] {
+      margin-top: 12px;
+      width: 100%;
+    }
+    .session-link {
+      margin-top: 10px;
+      word-break: break-all;
+      font-size: 13px;
+      color: #a5b4fc;
+    }
+    .log {
+      margin-top: 16px;
+      font-size: 13px;
+      max-height: 200px;
+      overflow-y: auto;
+      border-top: 1px solid rgba(148,163,184,0.3);
+      padding-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>BROKEN LORD – File Stream Uploader</h1>
+    <p>Tengeneza session, tuma link kwa simu nyingine, kisha anza kuhamisha files live.</p>
+
+    <button class="btn" id="createSessionBtn">Create Session</button>
+
+    <div class="session-link" id="sessionInfo" style="display:none;"></div>
+
+    <input type="file" id="fileInput" multiple />
+
+    <button class="btn" id="sendBtn">Start Streaming Files</button>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    const socket = io();
+    const createSessionBtn = document.getElementById("createSessionBtn");
+    const sessionInfo = document.getElementById("sessionInfo");
+    const fileInput = document.getElementById("fileInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const logEl = document.getElementById("log");
+
+    let currentSessionId = null;
+
+    function log(msg) {
+      const p = document.createElement("p");
+      p.textContent = msg;
+      logEl.appendChild(p);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    createSessionBtn.onclick = () => {
+      socket.emit("create_session", ({ sessionId }) => {
+        currentSessionId = sessionId;
+        const dashboardUrl = `${location.origin}/dashboard.html?session=${sessionId}`;
+        sessionInfo.style.display = "block";
+        sessionInfo.innerHTML = `
+          <strong>Session ID:</strong> ${sessionId}<br/>
+          <strong>Dashboard link:</strong><br/>${dashboardUrl}<br/><br/>
+          Tuma hii link kwa simu yako nyingine.
+        `;
+        log("Session created: " + sessionId);
+      });
+    };
+
+    async function sendFile(file) {
+      return new Promise((resolve) => {
+        const chunkSize = 64 * 1024;
+        const reader = new FileReader();
+        let offset = 0;
+        const fileId = `${file.name}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+        reader.onload = (e) => {
+          const chunk = e.target.result;
+          const done = offset + chunk.byteLength >= file.size;
+
+          socket.emit("send_file_chunk", {
+            sessionId: currentSessionId,
+            fileId,
+            name: file.name,
+            size: file.size,
+            chunk,
+            done
+          });
+
+          offset += chunk.byteLength;
+
+          if (!done) {
+            readSlice();
+          } else {
+            log(`Finished streaming: ${file.name}`);
+            resolve();
+          }
+        };
+
+        function readSlice() {
+          const slice = file.slice(offset, offset + chunkSize);
+          reader.readAsArrayBuffer(slice);
+        }
+
+        log(`Start streaming: ${file.name}`);
+        readSlice();
+      });
+    }
+
+    sendBtn.onclick = async () => {
+      if (!currentSessionId) {
+        alert("Create session first.");
+        return;
+      }
+      const files = Array.from(fileInput.files || []);
+      if (!files.length) {
+        alert("Chagua files kwanza.");
+        return;
+      }
+      for (const f of files) {
+        await sendFile(f);
+      }
+      log("All files streamed.");
+    };
+
+    socket.on("session_closed", () => {
+      log("Session closed. Uploader disconnected.");
+    });
+  </script>
+</body>
+</html>
